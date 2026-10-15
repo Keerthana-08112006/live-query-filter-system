@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>QueryFlow | Live Query Filter System</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;font-family:Arial,sans-serif;background:#f8f7fc;color:#24213a}
+header{padding:22px 8%;background:white;border-bottom:1px solid #e9e7f2}
+.brand{font-size:27px;font-weight:bold}.brand span{color:#6956e8}
+header p,.muted{color:#77758a;font-size:14px}
+main{max-width:1100px;width:90%;margin:auto}
+.intro{padding:42px 0 25px}
+.intro small{color:#6956e8;font-weight:bold;letter-spacing:2px}
+h1{font-size:clamp(28px,5vw,42px);margin-bottom:10px}
+.panel{padding:24px;background:white;border:1px solid #e9e7f2;border-radius:15px}
+input[type=search]{width:100%;padding:14px;border:1px solid #ddd8eb;border-radius:9px;font-size:16px;margin-top:10px}
+.filters{display:flex;flex-wrap:wrap;gap:12px;margin-top:15px}
+.filters label{padding:10px;border:1px solid #e9e7f2;border-radius:8px;cursor:pointer}
+button{cursor:pointer;border:1px solid #e2deef;border-radius:8px;padding:10px 14px;background:white}
+.clear{color:#6956e8;border:0}
+.heading{display:flex;justify-content:space-between;align-items:center;gap:10px}
+.results{padding:30px 0 45px}
+.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px}
+.card{background:white;border:1px solid #e9e7f2;border-radius:13px;padding:22px}
+.emoji{font-size:30px;margin-bottom:14px}
+.tag{display:inline-block;background:#f0edff;color:#6956e8;padding:6px 9px;border-radius:6px;font-size:12px}
+.card h3{margin:15px 0 8px}
+.price{font-size:21px;font-weight:bold}
+.pages{display:flex;justify-content:center;gap:8px;margin-top:24px;flex-wrap:wrap}
+.active{background:#6956e8;color:white}
+.status{text-align:center;padding:22px;color:#77758a}
+.error{color:#c0394a}
+footer{text-align:center;padding:24px;color:#77758a;border-top:1px solid #e9e7f2}
+[hidden]{display:none!important}
+@media(max-width:700px){.grid{grid-template-columns:repeat(2,minmax(0,1fr))}header{padding:20px 5%}}
+@media(max-width:450px){.grid{grid-template-columns:1fr}.panel{padding:16px}}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">Query<span>Flow</span></div>
+  <p>Discover products with instant search and smart filters.</p>
+</header>
+<main>
+  <section class="intro">
+    <small>SMART PRODUCT EXPLORER</small>
+    <h1>Find exactly what you need.</h1>
+    <p class="muted">Search, filter, and explore products in real time.</p>
+  </section>
+  <section class="panel">
+    <label for="search"> <strong>Search products</strong></label>
+    <input id="search" type="search" placeholder="Try laptop, shoes, watch...">
+    <div class="heading" style="margin-top:22px">
+      <strong>Categories</strong>
+      <button class="clear" id="clear" type="button">Clear filters</button>
+    </div>
+    <div id="categories" class="filters"></div>
+  </section>
+  <section class="results">
+    <div class="heading">
+      <div><h2>Explore Products</h2><p id="count" class="muted">Connecting...</p></div>
+      <span class="tag">● LIVE RESULTS</span>
+    </div>
+    <div id="status" class="status">Loading products...</div>
+    <div id="grid" class="grid"></div>
+    <div id="pages" class="pages"></div>
+  </section>
+</main>
+<footer>QueryFlow · Live Query Filter System</footer>
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const search = $("search");
+  const categories = $("categories");
+  const grid = $("grid");
+  const status = $("status");
+  const count = $("count");
+  const pages = $("pages");
+  let page = 1;
+  let timer;
+  let requestId = 0;
+
+  async function loadCategories() {
+    try {
+      const response = await fetch("/api/categories");
+      if (!response.ok) throw new Error("Category API failed");
+      const data = await response.json();
+
+      categories.replaceChildren();
+      data.forEach(name => {
+        const label = document.createElement("label");
+        const checkbox = document.createElement("input");
+        checkbox.type = "checkbox";
+        checkbox.value = name;
+        checkbox.addEventListener("change", () => {
+          page = 1;
+          loadProducts();
+        });
+        label.append(checkbox, document.createTextNode(" " + name));
+        categories.appendChild(label);
+      });
+    } catch (error) {
+      status.textContent = "Could not load categories. Check the server.";
+    }
+  }
+
+  function addPageButton(text, target, disabled, active) {
+    const button = document.createElement("button");
+    button.textContent = text;
+    button.disabled = disabled;
+    if (active) button.classList.add("active");
+    button.addEventListener("click", () => {
+      page = target;
+      loadProducts();
+    });
+    pages.appendChild(button);
+  }
+
+  async function loadProducts() {
+    const id = ++requestId;
+    status.hidden = false;
+    status.className = "status";
+    status.textContent = "Loading products...";
+    grid.replaceChildren();
+    pages.replaceChildren();
+    count.textContent = "Searching...";
+
+    const params = new URLSearchParams({
+      search: search.value.trim(),
+      category: [...categories.querySelectorAll("input:checked")]
+        .map(input => input.value).join(","),
+      page: String(page),
+      limit: "6"
+    });
+
+    try {
+      const response = await fetch("/api/products?" + params.toString());
+      if (!response.ok) throw new Error("Product API returned " + response.status);
+      const data = await response.json();
+      if (id !== requestId) return;
+
+      status.hidden = true;
+      count.textContent = data.total + " product" +
+        (data.total === 1 ? "" : "s") + " found";
+
+      if (!data.products || data.products.length === 0) {
+        status.hidden = false;
+        status.textContent = "No products found. Try another search.";
+        return;
+      }
+
+      const icons = {
+        Electronics: "💻",
+        Clothing: "👕",
+        Footwear: "👟",
+        Accessories: "🎒"
+      };
+
+      data.products.forEach(product => {
+        const card = document.createElement("article");
+        card.className = "card";
+
+        const emoji = document.createElement("div");
+        emoji.className = "emoji";
+        emoji.textContent = icons[product.category] || "📦";
+
+        const tag = document.createElement("span");
+        tag.className = "tag";
+        tag.textContent = product.category;
+
+        const name = document.createElement("h3");
+        name.textContent = product.name;
+
+        const price = document.createElement("div");
+        price.className = "price";
+        price.textContent = new Intl.NumberFormat("en-IN", {
+          style: "currency",
+          currency: "INR",
+          maximumFractionDigits: 0
+        }).format(product.price);
+
+        card.append(emoji, tag, name, price);
+        grid.appendChild(card);
+      });
+
+      if (data.totalPages > 1) {
+        addPageButton("←", page - 1, page <= 1, false);
+        for (let n = 1; n <= data.totalPages; n++) {
+          addPageButton(String(n), n, false, n === page);
+        }
+        addPageButton("→", page + 1, page >= data.totalPages, false);
+      }
+    } catch (error) {
+      if (id !== requestId) return;
+      status.hidden = false;
+      status.className = "status error";
+      status.textContent = "API error: " + error.message;
+      count.textContent = "Request failed";
+    }
+  }
+
+  search.addEventListener("input", () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      page = 1;
+      loadProducts();
+    }, 350);
+  });
+
+  search.addEventListener("keydown", event => {
+    if (event.key === "Enter") {
+      clearTimeout(timer);
+      page = 1;
+      loadProducts();
+    }
+  });
+
+  $("clear").addEventListener("click", () => {
+    search.value = "";
+    categories.querySelectorAll("input").forEach(input => {
+      input.checked = false;
+    });
+    page = 1;
+    loadProducts();
+  });
+
+  async function start() {
+    await loadCategories();
+    await loadProducts();
+  }
+
+  start();
+})();
+</script>
+</body>
+</html>
